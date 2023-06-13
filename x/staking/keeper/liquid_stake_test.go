@@ -14,6 +14,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func GenerateAddress(ctx sdk.Context, connectionID, portID string) sdk.AccAddress {
+	hostModuleAcc := address.Module("interchainaccounts", []byte("icahost-accounts"))
+	header := ctx.BlockHeader()
+
+	buf := []byte(connectionID + portID)
+	buf = append(buf, header.AppHash...)
+	buf = append(buf, header.DataHash...)
+
+	return address.Derive(hostModuleAcc, buf)
+}
+
+func NewInterchainAccount(ba *authtypes.BaseAccount, accountOwner string) *types.InterchainAccount {
+	return &types.InterchainAccount{
+		BaseAccount:  ba,
+		AccountOwner: accountOwner,
+	}
+}
+
+func createInterchainAccount(ctx sdk.Context, app *simapp.SimApp, connectionID, controllerPortID string) (sdk.AccAddress, error) {
+	accAddress := GenerateAddress(ctx, connectionID, controllerPortID)
+
+	interchainAccount := NewInterchainAccount(
+		authtypes.NewBaseAccountWithAddress(accAddress),
+		controllerPortID,
+	)
+
+	app.AccountKeeper.NewAccount(ctx, interchainAccount)
+	app.AccountKeeper.SetAccount(ctx, interchainAccount)
+
+	// k.SetInterchainAccountAddress(ctx, connectionID, controllerPortID, interchainAccount.Address)
+
+	return accAddress, nil
+}
+
 // Helper function to create a base account from an account name
 // Used to differentiate against liquid staking provider module account
 func createBaseAccount(app *simapp.SimApp, ctx sdk.Context, accountName string) sdk.AccAddress {
@@ -33,6 +67,11 @@ func createICAAccount(app *simapp.SimApp, ctx sdk.Context, accountName string) s
 	app.AccountKeeper.SetAccount(ctx, account)
 
 	return accountAddress
+}
+
+func createICAAccount2(app *simapp.SimApp, ctx sdk.Context, accountName string) sdk.AccAddress {
+	accAddr, _ := createInterchainAccount(ctx, app, "connection-0", "icahost")
+	return accAddr
 }
 
 // Tests Set/Get TotalLiquidStakedTokens
@@ -72,10 +111,12 @@ func TestAccountIsLiquidStakingProvider(t *testing.T) {
 	// Create base and ICA accounts
 	baseAccountAddress := createBaseAccount(app, ctx, "base-account")
 	icaAccountAddress := createICAAccount(app, ctx, "ica-module-account")
+	icaAccountAddress2 := createICAAccount2(app, ctx, "ica-module-account")
 
 	// Only the ICA module account should be considered a liquid staking provider
 	require.False(t, app.StakingKeeper.AccountIsLiquidStakingProvider(ctx, baseAccountAddress), "base account")
 	require.True(t, app.StakingKeeper.AccountIsLiquidStakingProvider(ctx, icaAccountAddress), "ICA module account")
+	require.True(t, app.StakingKeeper.AccountIsLiquidStakingProvider(ctx, icaAccountAddress2), "ICA module account")
 }
 
 // Helper function to clear the Bonded pool balances before a unit test
